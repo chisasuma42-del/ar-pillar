@@ -3,18 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>遠方複数柱演出 - 方向シミュレーター</title>
+    <title>AR実景合成 - 複数光柱シミュレーター</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #050814;
+            background-color: #000;
             font-family: sans-serif;
             color: #fff;
         }
-        #canvas-container {
+        /* リアカメラの映像を表示する背景ビデオ */
+        #camera-video {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100vw;
             height: 100vh;
+            object-fit: cover;
+            z-index: 1;
+        }
+        /* 3D描画キャンバス（カメラ映像の上に重ねる） */
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2;
+            pointer-events: none;
         }
         /* 案内UI */
         #ui {
@@ -22,7 +38,7 @@
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.6);
             padding: 12px 24px;
             border-radius: 30px;
             border: 1px solid rgba(255, 255, 255, 0.2);
@@ -40,7 +56,7 @@
             margin: 0;
             color: #ccc;
         }
-        /* iOS用のセンサー許可ボタン */
+        /* カメラ・センサー起動ボタン */
         #start-btn {
             position: absolute;
             top: 50%;
@@ -63,75 +79,88 @@
 </head>
 <body>
 
+    <!-- 背面カメラ表示用タグ -->
+    <video id="camera-video" autoplay playsinline muted></video>
+
     <div id="ui">
-        <h1>✨ 複数光柱 演出イメージ</h1>
-        <p>スマホをかざして周囲の遠くを見回してください</p>
+        <h1>✨ AR実景合成イメージ</h1>
+        <p>周囲にスマホを向けて景色の先の光を確認してください</p>
     </div>
 
-    <button id="start-btn" onclick="initSensors()">タップして体験を開始</button>
+    <button id="start-btn" onclick="startAR()">タップしてカメラとARを開始</button>
     <div id="canvas-container"></div>
 
     <script>
         let scene, camera, renderer;
-        const pillars = []; // 各柱をアニメーションさせるための配列
-        
-        // 1. 3D空間の初期化
+        const pillars = [];
+
+        // 1. スマホの背面カメラを起動する関数
+        async function initCamera() {
+            const video = document.getElementById('camera-video');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { exact: "environment" } }, // 背面カメラを指定
+                    audio: false
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                // 背面カメラの直接指定に失敗した場合は一般的なカメラを取得
+                try {
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({
+                        video: true,
+                        audio: false
+                    });
+                    video.srcObject = fallbackStream;
+                } catch (e) {
+                    alert('カメラのアクセス許可が得られませんでした。');
+                }
+            }
+        }
+
+        // 2. 3D空間の初期化（背景透過設定）
         function initThree() {
             const container = document.getElementById('canvas-container');
             
             scene = new THREE.Scene();
-            // 遠くの雰囲気を出す背景フォグ（霧）
-            scene.fog = new THREE.FogExp2(0x050814, 0.002);
 
-            // 遠くまで描画できるよう far を 2000 に設定
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
-            camera.position.set(0, 1.6, 0); // 人の目線の高さ
+            camera.position.set(0, 1.6, 0);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            // alpha: true で背景を透明にし、後ろのカメラ映像を透過させる
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             container.appendChild(renderer.domElement);
 
-            // 環境光
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
-            // 広大な広がりを感じさせる床面（グリッド）
-            const gridHelper = new THREE.GridHelper(1000, 100, 0x00ffff, 0x112233);
-            gridHelper.position.y = 0;
-            scene.add(gridHelper);
-
-            // 📍 複数の光の柱を異なる位置・距離・大きさに配置
-            // x: 左右, z: 前後(-が正面/北), radius: 柱の太さ, height: 高さ, color: 色
+            // 📍 5本の光の柱を配置
             const pillarConfigs = [
-                { x: 0,    z: -30,  radius: 1.5, height: 120, color: 0x00ffff }, // メイン柱（やや近い・正面）
-                { x: 120,  z: -250, radius: 4.0, height: 300, color: 0x33ffff }, // 遠方（北東）
-                { x: -180, z: -350, radius: 5.5, height: 400, color: 0x00e5ff }, // 超遠方（北西）
-                { x: 80,   z: -500, radius: 7.0, height: 500, color: 0x66ffff }, // 最遠方（北北東）
-                { x: -90,  z: -180, radius: 3.0, height: 250, color: 0x00c8ff }  // 中距離（西北西）
+                { x: 0,    z: -30,  radius: 1.5, height: 120, color: 0x00ffff }, 
+                { x: 120,  z: -250, radius: 4.0, height: 300, color: 0x33ffff }, 
+                { x: -180, z: -350, radius: 5.5, height: 400, color: 0x00e5ff }, 
+                { x: 80,   z: -500, radius: 7.0, height: 500, color: 0x66ffff }, 
+                { x: -90,  z: -180, radius: 3.0, height: 250, color: 0x00c8ff }  
             ];
 
             pillarConfigs.forEach(config => {
                 createPillar(config.x, config.z, config.radius, config.height, config.color);
             });
 
-            // ウィンドウサイズ変更対応
             window.addEventListener('resize', onWindowResize);
-
-            // アニメーションループ開始
             animate();
         }
 
-        // 2. 光の柱オブジェクトを生成する関数
+        // 光の柱作成
         function createPillar(x, z, radius, height, colorHex) {
             const pillarGroup = new THREE.Group();
 
-            // ① 柱外殻（メインの発光シリンダー）
             const geometry = new THREE.CylinderGeometry(radius, radius, height, 32, 1, true);
             const material = new THREE.MeshBasicMaterial({
                 color: colorHex,
                 transparent: true,
-                opacity: 0.5,
+                opacity: 0.6,
                 side: THREE.DoubleSide,
                 blending: THREE.AdditiveBlending
             });
@@ -139,63 +168,49 @@
             cylinder.position.y = height / 2;
             pillarGroup.add(cylinder);
 
-            // ② 芯となる強い光（中央の明るいコア）
             const coreGeo = new THREE.CylinderGeometry(radius * 0.3, radius * 0.3, height, 16, 1, true);
             const coreMat = new THREE.MeshBasicMaterial({
                 color: 0xffffff,
                 transparent: true,
-                opacity: 0.85,
+                opacity: 0.9,
                 blending: THREE.AdditiveBlending
             });
             const core = new THREE.Mesh(coreGeo, coreMat);
             core.position.y = height / 2;
             pillarGroup.add(core);
 
-            // ③ 根元の光るリング
-            const ringGeo = new THREE.RingGeometry(radius * 0.5, radius * 3.5, 32);
-            const ringMat = new THREE.MeshBasicMaterial({
-                color: colorHex,
-                transparent: true,
-                opacity: 0.7,
-                side: THREE.DoubleSide,
-                blending: THREE.AdditiveBlending
-            });
-            const ring = new THREE.Mesh(ringGeo, ringMat);
-            ring.rotation.x = -Math.PI / 2;
-            ring.position.y = 0.1;
-            pillarGroup.add(ring);
-
-            // 座標設定
             pillarGroup.position.set(x, 0, z);
             scene.add(pillarGroup);
 
-            // アニメーション用に配列へ保存（回転速度に少し個体差をつける）
             pillars.push({
                 group: pillarGroup,
                 rotSpeed: 0.003 + Math.random() * 0.004
             });
         }
 
-        // 3. スマホの傾き・ジャイロセンサーの連動
-        function initSensors() {
+        // 3. カメラ起動とセンサー設定を一括スタート
+        async function startAR() {
             document.getElementById('start-btn').style.display = 'none';
 
+            // カメラ映像のスタート
+            await initCamera();
+
+            // 3Dシーンの初期化
             if (!scene) initThree();
 
+            // ジャイロセンサー（角度）の許可設定
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(response => {
                         if (response === 'granted') {
                             window.addEventListener('deviceorientation', handleOrientation);
                         } else {
-                            alert('センサーへのアクセスが拒否されました。PCの場合はマウスドラッグで閲覧可能です。');
-                            enableMouseControls();
+                            alert('センサーアクセスの許可が必要です。');
                         }
                     })
                     .catch(console.error);
             } else {
                 window.addEventListener('deviceorientation', handleOrientation);
-                enableMouseControls();
             }
         }
 
@@ -210,21 +225,6 @@
             camera.quaternion.setFromEuler(euler);
         }
 
-        function enableMouseControls() {
-            let isDragging = false;
-            let previousMousePosition = { x: 0, y: 0 };
-
-            document.addEventListener('mousedown', () => isDragging = true);
-            document.addEventListener('mouseup', () => isDragging = false);
-            document.addEventListener('mousemove', (e) => {
-                if (!isDragging) return;
-                const deltaMove = { x: e.clientX - previousMousePosition.x, y: e.clientY - previousMousePosition.y };
-                camera.rotation.y -= deltaMove.x * 0.005;
-                camera.rotation.x -= deltaMove.y * 0.005;
-                previousMousePosition = { x: e.clientX, y: e.clientY };
-            });
-        }
-
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -234,7 +234,6 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            // 各柱をゆらゆら回転
             pillars.forEach(p => {
                 p.group.rotation.y += p.rotSpeed;
             });
