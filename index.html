@@ -3,74 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR実景合成（空間連動補正版） - 複数光柱</title>
+    <title>AR実景合成 - センサーテスト</title>
     <style>
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #000;
-            font-family: sans-serif;
-            color: #fff;
-        }
-        #camera-video {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            object-fit: cover;
-            z-index: 1;
-        }
-        #canvas-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 2;
-            pointer-events: none;
-        }
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; color: #fff; }
+        #camera-video { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; }
         #ui {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.6);
-            padding: 12px 24px;
-            border-radius: 30px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            text-align: center;
-            pointer-events: none;
-            z-index: 10;
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.6); padding: 12px 24px; border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2); text-align: center; pointer-events: none; z-index: 10;
         }
-        #ui h1 {
-            font-size: 16px;
-            margin: 0 0 4px 0;
-            color: #00ffff;
-        }
-        #ui p {
-            font-size: 12px;
-            margin: 0;
-            color: #ccc;
+        #ui h1 { font-size: 16px; margin: 0 0 4px 0; color: #00ffff; }
+        /* センサー数値を表示するデバッグエリア */
+        #debug-info {
+            position: absolute; bottom: 20px; left: 20px;
+            background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px;
+            font-family: monospace; font-size: 12px; color: #00ff00; z-index: 200; pointer-events: none;
         }
         #start-btn {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            padding: 16px 32px;
-            font-size: 18px;
-            font-weight: bold;
-            background: linear-gradient(135deg, #00ffff, #0088ff);
-            color: #000;
-            border: none;
-            border-radius: 50px;
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
-            cursor: pointer;
-            z-index: 100;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 16px 32px; font-size: 18px; font-weight: bold;
+            background: linear-gradient(135deg, #00ffff, #0088ff); color: #000;
+            border: none; border-radius: 50px; box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+            cursor: pointer; z-index: 100;
         }
     </style>
-    <!-- Three.js CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -78,43 +35,42 @@
     <video id="camera-video" autoplay playsinline muted></video>
 
     <div id="ui">
-        <h1>✨ AR実景合成（空間連動型）</h1>
-        <p>スマホを左右に動かして画面外から柱が入ってくるのを確認してください</p>
+        <h1>✨ AR実景合成</h1>
     </div>
 
-    <button id="start-btn" onclick="startAR()">タップしてカメラとARを開始</button>
+    <!-- センサー値チェック用のテキスト -->
+    <div id="debug-info">
+        Sensor: Waiting...<br>
+        Alpha (方角): 0<br>
+        Beta (上下): 0
+    </div>
+
+    <button id="start-btn" onclick="startAR()">タップして開始</button>
     <div id="canvas-container"></div>
 
     <script>
         let scene, camera, renderer;
         const pillars = [];
+        const debugElem = document.getElementById('debug-info');
 
         async function initCamera() {
             const video = document.getElementById('camera-video');
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { exact: "environment" } },
-                    audio: false
+                    video: { facingMode: { exact: "environment" } }, audio: false
                 });
                 video.srcObject = stream;
             } catch (err) {
                 try {
-                    const fallbackStream = await navigator.mediaDevices.getUserMedia({
-                        video: true,
-                        audio: false
-                    });
+                    const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                     video.srcObject = fallbackStream;
-                } catch (e) {
-                    alert('カメラのアクセス許可が得られませんでした。');
-                }
+                } catch (e) { alert('カメラの許可が得られませんでした。'); }
             }
         }
 
         function initThree() {
             const container = document.getElementById('canvas-container');
-            
             scene = new THREE.Scene();
-
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
             camera.position.set(0, 1.6, 0);
 
@@ -126,104 +82,71 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
-            // 📍 周囲360度に散らして5本の光の柱を配置（北・東・西・北東・北西）
+            // 前後左右に柱を配置
             const pillarConfigs = [
-                { x: 0,    z: -50,  radius: 2.0, height: 150, color: 0x00ffff }, // 正面（北）
-                { x: 150,  z: 0,    radius: 4.0, height: 300, color: 0x33ffff }, // 右（東）
-                { x: -150, z: 0,    radius: 4.0, height: 300, color: 0x00e5ff }, // 左（西）
-                { x: 120,  z: -250, radius: 5.5, height: 400, color: 0x66ffff }, // 右奥（北東）
-                { x: -120, z: -250, radius: 5.5, height: 400, color: 0x00c8ff }  // 左奥（北西）
+                { x: 0,    z: -60,  radius: 2.0, height: 150, color: 0x00ffff }, // 正面
+                { x: 150,  z: 0,    radius: 4.0, height: 300, color: 0x33ffff }, // 右
+                { x: -150, z: 0,    radius: 4.0, height: 300, color: 0x00e5ff }  // 左
             ];
 
-            pillarConfigs.forEach(config => {
-                createPillar(config.x, config.z, config.radius, config.height, config.color);
-            });
-
+            pillarConfigs.forEach(config => createPillar(config.x, config.z, config.radius, config.height, config.color));
             window.addEventListener('resize', onWindowResize);
             animate();
         }
 
         function createPillar(x, z, radius, height, colorHex) {
             const pillarGroup = new THREE.Group();
-
             const geometry = new THREE.CylinderGeometry(radius, radius, height, 32, 1, true);
-            const material = new THREE.MeshBasicMaterial({
-                color: colorHex,
-                transparent: true,
-                opacity: 0.6,
-                side: THREE.DoubleSide,
-                blending: THREE.AdditiveBlending
-            });
+            const material = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.6, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
             const cylinder = new THREE.Mesh(geometry, material);
             cylinder.position.y = height / 2;
             pillarGroup.add(cylinder);
 
-            const coreGeo = new THREE.CylinderGeometry(radius * 0.3, radius * 0.3, height, 16, 1, true);
-            const coreMat = new THREE.MeshBasicMaterial({
-                color: 0xffffff,
-                transparent: true,
-                opacity: 0.9,
-                blending: THREE.AdditiveBlending
-            });
-            const core = new THREE.Mesh(coreGeo, coreMat);
-            core.position.y = height / 2;
-            pillarGroup.add(core);
-
             pillarGroup.position.set(x, 0, z);
             scene.add(pillarGroup);
-
-            pillars.push({
-                group: pillarGroup,
-                rotSpeed: 0.003 + Math.random() * 0.004
-            });
+            pillars.push({ group: pillarGroup, rotSpeed: 0.005 });
         }
 
         async function startAR() {
             document.getElementById('start-btn').style.display = 'none';
-
             await initCamera();
-
             if (!scene) initThree();
 
-            // Webkit (iOS) と Android で方位イベントのリスナーを切り分け
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(response => {
                         if (response === 'granted') {
                             window.addEventListener('deviceorientation', handleOrientation, true);
                         } else {
-                            alert('センサーアクセスの許可が必要です。');
+                            debugElem.innerHTML = "STATUS: センサーアクセスが拒否されました";
                         }
                     })
-                    .catch(console.error);
+                    .catch(err => { debugElem.innerHTML = "ERROR: " + err; });
             } else {
                 window.addEventListener('deviceorientation', handleOrientation, true);
             }
         }
 
-        // 💡 空間に柱を固定し、カメラの回転によって視界から出入りさせる処理
         function handleOrientation(event) {
-            let alpha = event.alpha; // コンパス方位角
-            let beta = event.beta;   // 前後傾き
-            let gamma = event.gamma; // 左右傾き
+            let alpha = event.alpha || 0;
+            let beta = event.beta || 0;
+            let gamma = event.gamma || 0;
 
-            if (alpha === null || beta === null || gamma === null) return;
-
-            // iOS (Safari) 特有のコンパス方位ヘディング対応
             if (event.webkitCompassHeading) {
-                alpha = event.webkitCompassHeading; // iOSの場合は正確なコンパス方位を使用
+                alpha = event.webkitCompassHeading;
             }
 
-            // ラジアンへ変換
+            // 画面左下のデバッグテキストを更新
+            debugElem.innerHTML = `STATUS: Active<br>Alpha(方角): ${Math.round(alpha)}°<br>Beta(傾き): ${Math.round(beta)}°`;
+
+            // カメラの角度を変更
             const alphaRad = THREE.MathUtils.degToRad(alpha);
             const betaRad = THREE.MathUtils.degToRad(beta);
             const gammaRad = THREE.MathUtils.degToRad(gamma);
 
-            // カメラの回転順序を設定（Y軸：方位回転、X軸：上下パン、Z軸：ロール）
-            // 端末を立てて持っている状態に合わせる
             camera.rotation.set(
-                betaRad - Math.PI / 2, // スマホを垂直に立てた位置を基点(0度)にする
-                -alphaRad,             // スマホを右に回すとカメラが右を向き、正面の柱が左に流れる
+                betaRad - Math.PI / 2,
+                -alphaRad,
                 -gammaRad,
                 'YXZ'
             );
@@ -237,11 +160,7 @@
 
         function animate() {
             requestAnimationFrame(animate);
-
-            pillars.forEach(p => {
-                p.group.rotation.y += p.rotSpeed;
-            });
-
+            pillars.forEach(p => p.group.rotation.y += p.rotSpeed);
             renderer.render(scene, camera);
         }
     </script>
