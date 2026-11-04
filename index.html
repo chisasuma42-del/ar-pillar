@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR実景合成（水平補正版） - 複数光柱</title>
+    <title>AR実景合成（全方向追従＋水平補正） - 複数光柱</title>
     <style>
         body {
             margin: 0;
@@ -78,8 +78,8 @@
     <video id="camera-video" autoplay playsinline muted></video>
 
     <div id="ui">
-        <h1>✨ AR実景合成（水平補正済）</h1>
-        <p>周囲を見回して水平な光の柱を確認してください</p>
+        <h1>✨ AR実景合成（全方向追従）</h1>
+        <p>スマホを上下左右に動かして光の柱を確認してください</p>
     </div>
 
     <button id="start-btn" onclick="startAR()">タップしてカメラとARを開始</button>
@@ -89,11 +89,10 @@
         let scene, camera, renderer;
         const pillars = [];
 
-        // カメラ・センサー計算用の回転クォータニオン
-        const zee = new THREE.Vector3(0, 0, 1);
+        // センサー回転制御用の変数
         const euler = new THREE.Euler();
         const q0 = new THREE.Quaternion();
-        const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // 画面の向き補正
+        const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90度 X軸回転（カメラの姿勢補正）
 
         async function initCamera() {
             const video = document.getElementById('camera-video');
@@ -132,7 +131,7 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
-            // 5本の柱の配置
+            // 5本の柱の配置（前後左右・遠近）
             const pillarConfigs = [
                 { x: 0,    z: -30,  radius: 1.5, height: 120, color: 0x00ffff }, 
                 { x: 120,  z: -250, radius: 4.0, height: 300, color: 0x33ffff }, 
@@ -206,20 +205,21 @@
             }
         }
 
-        // 💡 ジャイロセンサーのオイラー角変換（水平高精度補正）
+        // 💡 上下左右の連動と水平保持を両立させるクォータニオン計算
         function handleOrientation(event) {
-            if (!event.alpha && !event.beta && !event.gamma) return;
+            if (event.alpha === null || event.beta === null || event.gamma === null) return;
 
-            const alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0; // 方角
-            const beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;   // 前後傾き
-            const gamma = event.gamma ? THREE.MathUtils.degToRad(event.gamma) : 0; // 左右傾き
-            const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0; // 画面回転
+            const alpha = THREE.MathUtils.degToRad(event.alpha); // 方位角（左右回転）
+            const beta  = THREE.MathUtils.degToRad(event.beta);  // 前後傾き（上下パン）
+            const gamma = THREE.MathUtils.degToRad(event.gamma); // 左右傾き（ロール）
 
-            // 'ZXY' 順の回転を適用し、スマホの持ち方と空間軸の回転を一致させる
-            euler.set(beta, alpha, -gamma, 'ZXY');
-            camera.quaternion.setFromEuler(euler);
-            camera.quaternion.multiply(q1); // スマホカメラの基本姿勢補正
-            camera.quaternion.multiply(q0.setFromAxisAngle(zee, -orient)); // 画面回転補正
+            // 1. スマホの姿勢角を設定（回転順序: 'YXZ'）
+            euler.set(beta, alpha, -gamma, 'YXZ');
+            
+            // 2. クォータニオンへ変換し、端末姿勢とThree.jsカメラ（-Z軸向き）の差分を補正
+            q0.setFromEuler(euler);
+            camera.quaternion.copy(q0);
+            camera.quaternion.multiply(q1); // 立てて持った状態の基本軸補正
         }
 
         function onWindowResize() {
