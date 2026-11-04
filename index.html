@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR実景合成 - センサーテスト</title>
+    <title>AR実景合成 - 完璧連動版</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; color: #fff; }
         #camera-video { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
@@ -14,7 +14,7 @@
             border: 1px solid rgba(255, 255, 255, 0.2); text-align: center; pointer-events: none; z-index: 10;
         }
         #ui h1 { font-size: 16px; margin: 0 0 4px 0; color: #00ffff; }
-        /* センサー数値を表示するデバッグエリア */
+        #ui p { font-size: 12px; margin: 0; color: #ccc; }
         #debug-info {
             position: absolute; bottom: 20px; left: 20px;
             background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px;
@@ -36,13 +36,11 @@
 
     <div id="ui">
         <h1>✨ AR実景合成</h1>
+        <p>周囲を見回して光の柱を確認してください</p>
     </div>
 
-    <!-- センサー値チェック用のテキスト -->
     <div id="debug-info">
-        Sensor: Waiting...<br>
-        Alpha (方角): 0<br>
-        Beta (上下): 0
+        Status: ボタンを押してください
     </div>
 
     <button id="start-btn" onclick="startAR()">タップして開始</button>
@@ -52,6 +50,39 @@
         let scene, camera, renderer;
         const pillars = [];
         const debugElem = document.getElementById('debug-info');
+
+        // 1. タップされた直後にセンサー許可を要求（ここを最優先に修正）
+        function startAR() {
+            document.getElementById('start-btn').style.display = 'none';
+
+            // iOS 13+ のセンサー許可（非同期処理を入れる前に真っ先に要求する）
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation, true);
+                            debugElem.innerHTML = "STATUS: センサー許可完了";
+                            // センサーの許可が取れた後にカメラと3Dを開始
+                            initSystem();
+                        } else {
+                            debugElem.innerHTML = "STATUS: センサー許可が拒否されました";
+                        }
+                    })
+                    .catch(err => {
+                        debugElem.innerHTML = "ERROR: " + err;
+                    });
+            } else {
+                // Android や PC の場合
+                window.addEventListener('deviceorientation', handleOrientation, true);
+                initSystem();
+            }
+        }
+
+        // 2. カメラと3D描画の初期化処理
+        async function initSystem() {
+            await initCamera();
+            if (!scene) initThree();
+        }
 
         async function initCamera() {
             const video = document.getElementById('camera-video');
@@ -64,7 +95,9 @@
                 try {
                     const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                     video.srcObject = fallbackStream;
-                } catch (e) { alert('カメラの許可が得られませんでした。'); }
+                } catch (e) {
+                    alert('カメラの許可が得られませんでした。');
+                }
             }
         }
 
@@ -82,11 +115,11 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
-            // 前後左右に柱を配置
+            // 正面・右・左に柱を配置
             const pillarConfigs = [
                 { x: 0,    z: -60,  radius: 2.0, height: 150, color: 0x00ffff }, // 正面
-                { x: 150,  z: 0,    radius: 4.0, height: 300, color: 0x33ffff }, // 右
-                { x: -150, z: 0,    radius: 4.0, height: 300, color: 0x00e5ff }  // 左
+                { x: 150,  z: 0,    radius: 4.0, height: 300, color: 0x33ffff }, // 右（90度横）
+                { x: -150, z: 0,    radius: 4.0, height: 300, color: 0x00e5ff }  // 左（90度横）
             ];
 
             pillarConfigs.forEach(config => createPillar(config.x, config.z, config.radius, config.height, config.color));
@@ -107,26 +140,6 @@
             pillars.push({ group: pillarGroup, rotSpeed: 0.005 });
         }
 
-        async function startAR() {
-            document.getElementById('start-btn').style.display = 'none';
-            await initCamera();
-            if (!scene) initThree();
-
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(response => {
-                        if (response === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation, true);
-                        } else {
-                            debugElem.innerHTML = "STATUS: センサーアクセスが拒否されました";
-                        }
-                    })
-                    .catch(err => { debugElem.innerHTML = "ERROR: " + err; });
-            } else {
-                window.addEventListener('deviceorientation', handleOrientation, true);
-            }
-        }
-
         function handleOrientation(event) {
             let alpha = event.alpha || 0;
             let beta = event.beta || 0;
@@ -136,10 +149,8 @@
                 alpha = event.webkitCompassHeading;
             }
 
-            // 画面左下のデバッグテキストを更新
-            debugElem.innerHTML = `STATUS: Active<br>Alpha(方角): ${Math.round(alpha)}°<br>Beta(傾き): ${Math.round(beta)}°`;
+            debugElem.innerHTML = `STATUS: 動作中<br>方角: ${Math.round(alpha)}°<br>傾き: ${Math.round(beta)}°`;
 
-            // カメラの角度を変更
             const alphaRad = THREE.MathUtils.degToRad(alpha);
             const betaRad = THREE.MathUtils.degToRad(beta);
             const gammaRad = THREE.MathUtils.degToRad(gamma);
@@ -161,7 +172,7 @@
         function animate() {
             requestAnimationFrame(animate);
             pillars.forEach(p => p.group.rotation.y += p.rotSpeed);
-            renderer.render(scene, camera);
+            if (scene && camera) renderer.render(scene, camera);
         }
     </script>
 </body>
