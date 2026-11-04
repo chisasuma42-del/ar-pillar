@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>光の柱演出 - 方向シミュレーター</title>
+    <title>遠方複数柱演出 - 方向シミュレーター</title>
     <style>
         body {
             margin: 0;
@@ -64,26 +64,27 @@
 <body>
 
     <div id="ui">
-        <h1>✨ 光の柱 演出イメージ</h1>
-        <p>スマホをかざして周りを見回してください</p>
+        <h1>✨ 複数光柱 演出イメージ</h1>
+        <p>スマホをかざして周囲の遠くを見回してください</p>
     </div>
 
     <button id="start-btn" onclick="initSensors()">タップして体験を開始</button>
     <div id="canvas-container"></div>
 
     <script>
-        let scene, camera, renderer, pillarGroup;
-        let alphaOffset = 0; // 方角調整用
+        let scene, camera, renderer;
+        const pillars = []; // 各柱をアニメーションさせるための配列
         
         // 1. 3D空間の初期化
         function initThree() {
             const container = document.getElementById('canvas-container');
             
             scene = new THREE.Scene();
-            // 背景にうっすら星空のような霧を設定
-            scene.fog = new THREE.FogExp2(0x050814, 0.005);
+            // 遠くの雰囲気を出す背景フォグ（霧）
+            scene.fog = new THREE.FogExp2(0x050814, 0.002);
 
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            // 遠くまで描画できるよう far を 2000 に設定
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
             camera.position.set(0, 1.6, 0); // 人の目線の高さ
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -95,13 +96,24 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
 
-            // 床面（グリッド）で視覚的な方向感を与える
-            const gridHelper = new THREE.GridHelper(200, 50, 0x00ffff, 0x223344);
+            // 広大な広がりを感じさせる床面（グリッド）
+            const gridHelper = new THREE.GridHelper(1000, 100, 0x00ffff, 0x112233);
             gridHelper.position.y = 0;
             scene.add(gridHelper);
 
-            // 光の柱を作成して配置
-            createPillar();
+            // 📍 複数の光の柱を異なる位置・距離・大きさに配置
+            // x: 左右, z: 前後(-が正面/北), radius: 柱の太さ, height: 高さ, color: 色
+            const pillarConfigs = [
+                { x: 0,    z: -30,  radius: 1.5, height: 120, color: 0x00ffff }, // メイン柱（やや近い・正面）
+                { x: 120,  z: -250, radius: 4.0, height: 300, color: 0x33ffff }, // 遠方（北東）
+                { x: -180, z: -350, radius: 5.5, height: 400, color: 0x00e5ff }, // 超遠方（北西）
+                { x: 80,   z: -500, radius: 7.0, height: 500, color: 0x66ffff }, // 最遠方（北北東）
+                { x: -90,  z: -180, radius: 3.0, height: 250, color: 0x00c8ff }  // 中距離（西北西）
+            ];
+
+            pillarConfigs.forEach(config => {
+                createPillar(config.x, config.z, config.radius, config.height, config.color);
+            });
 
             // ウィンドウサイズ変更対応
             window.addEventListener('resize', onWindowResize);
@@ -110,41 +122,41 @@
             animate();
         }
 
-        // 2. 光の柱オブジェクトの作成
-        function createPillar() {
-            pillarGroup = new THREE.Group();
+        // 2. 光の柱オブジェクトを生成する関数
+        function createPillar(x, z, radius, height, colorHex) {
+            const pillarGroup = new THREE.Group();
 
-            // ① 柱本体（シリンダー）
-            const geometry = new THREE.CylinderGeometry(1.5, 1.5, 100, 32, 1, true);
+            // ① 柱外殻（メインの発光シリンダー）
+            const geometry = new THREE.CylinderGeometry(radius, radius, height, 32, 1, true);
             const material = new THREE.MeshBasicMaterial({
-                color: 0x00ffff,
+                color: colorHex,
                 transparent: true,
-                opacity: 0.6,
+                opacity: 0.5,
                 side: THREE.DoubleSide,
-                blending: THREE.AdditiveBlending // 幻想的な発光合成
+                blending: THREE.AdditiveBlending
             });
             const cylinder = new THREE.Mesh(geometry, material);
-            cylinder.position.y = 50; // 地面から上に伸ばす
+            cylinder.position.y = height / 2;
             pillarGroup.add(cylinder);
 
-            // ② 芯となる強い光（中央の細い柱）
-            const coreGeo = new THREE.CylinderGeometry(0.4, 0.4, 100, 16, 1, true);
+            // ② 芯となる強い光（中央の明るいコア）
+            const coreGeo = new THREE.CylinderGeometry(radius * 0.3, radius * 0.3, height, 16, 1, true);
             const coreMat = new THREE.MeshBasicMaterial({
                 color: 0xffffff,
                 transparent: true,
-                opacity: 0.9,
+                opacity: 0.85,
                 blending: THREE.AdditiveBlending
             });
             const core = new THREE.Mesh(coreGeo, coreMat);
-            core.position.y = 50;
+            core.position.y = height / 2;
             pillarGroup.add(core);
 
             // ③ 根元の光るリング
-            const ringGeo = new THREE.RingGeometry(0.5, 5, 32);
+            const ringGeo = new THREE.RingGeometry(radius * 0.5, radius * 3.5, 32);
             const ringMat = new THREE.MeshBasicMaterial({
-                color: 0x00ffff,
+                color: colorHex,
                 transparent: true,
-                opacity: 0.8,
+                opacity: 0.7,
                 side: THREE.DoubleSide,
                 blending: THREE.AdditiveBlending
             });
@@ -153,53 +165,51 @@
             ring.position.y = 0.1;
             pillarGroup.add(ring);
 
-            // 📍 柱を配置する位置（例：北方向・目線から15m先）
-            // Z座標がマイナス方向がデフォルトの「北/正面」
-            pillarGroup.position.set(0, 0, -15);
+            // 座標設定
+            pillarGroup.position.set(x, 0, z);
             scene.add(pillarGroup);
+
+            // アニメーション用に配列へ保存（回転速度に少し個体差をつける）
+            pillars.push({
+                group: pillarGroup,
+                rotSpeed: 0.003 + Math.random() * 0.004
+            });
         }
 
         // 3. スマホの傾き・ジャイロセンサーの連動
         function initSensors() {
             document.getElementById('start-btn').style.display = 'none';
 
-            // 3Dシーン開始
             if (!scene) initThree();
 
-            // iOS 13+ のセンサー許可要求
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(response => {
                         if (response === 'granted') {
                             window.addEventListener('deviceorientation', handleOrientation);
                         } else {
-                            alert('センサーへのアクセスが拒否されました。PCの場合はマウスで操作できます。');
+                            alert('センサーへのアクセスが拒否されました。PCの場合はマウスドラッグで閲覧可能です。');
                             enableMouseControls();
                         }
                     })
                     .catch(console.error);
             } else {
-                // AndroidまたはPC
                 window.addEventListener('deviceorientation', handleOrientation);
-                enableMouseControls(); // PCフォールバック
+                enableMouseControls();
             }
         }
 
-        // センサーの角度をカメラに反映
         function handleOrientation(event) {
             if (!event.alpha && !event.beta && !event.gamma) return;
 
-            // 方位角（alpha）、前後傾き（beta）、左右傾き（gamma）をラジアンに変換
             const alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0;
             const beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;
             const gamma = event.gamma ? THREE.MathUtils.degToRad(event.gamma) : 0;
 
-            // オイラー角を使ってカメラの回転を更新
             const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
             camera.quaternion.setFromEuler(euler);
         }
 
-        // PCブラウザ確認用のマウスドラッグ操作
         function enableMouseControls() {
             let isDragging = false;
             let previousMousePosition = { x: 0, y: 0 };
@@ -221,14 +231,13 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // 描画フレームごとのアニメーション（柱をゆらゆら光らせる）
         function animate() {
             requestAnimationFrame(animate);
 
-            if (pillarGroup) {
-                // 柱をゆっくり回転させて神秘的な動きを出す
-                pillarGroup.rotation.y += 0.005;
-            }
+            // 各柱をゆらゆら回転
+            pillars.forEach(p => {
+                p.group.rotation.y += p.rotSpeed;
+            });
 
             renderer.render(scene, camera);
         }
