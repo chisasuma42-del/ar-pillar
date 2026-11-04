@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR実景合成 - 複数光柱シミュレーター</title>
+    <title>AR実景合成（水平補正版） - 複数光柱</title>
     <style>
         body {
             margin: 0;
@@ -12,7 +12,6 @@
             font-family: sans-serif;
             color: #fff;
         }
-        /* リアカメラの映像を表示する背景ビデオ */
         #camera-video {
             position: absolute;
             top: 0;
@@ -22,7 +21,6 @@
             object-fit: cover;
             z-index: 1;
         }
-        /* 3D描画キャンバス（カメラ映像の上に重ねる） */
         #canvas-container {
             position: absolute;
             top: 0;
@@ -32,7 +30,6 @@
             z-index: 2;
             pointer-events: none;
         }
-        /* 案内UI */
         #ui {
             position: absolute;
             top: 20px;
@@ -56,7 +53,6 @@
             margin: 0;
             color: #ccc;
         }
-        /* カメラ・センサー起動ボタン */
         #start-btn {
             position: absolute;
             top: 50%;
@@ -79,12 +75,11 @@
 </head>
 <body>
 
-    <!-- 背面カメラ表示用タグ -->
     <video id="camera-video" autoplay playsinline muted></video>
 
     <div id="ui">
-        <h1>✨ AR実景合成イメージ</h1>
-        <p>周囲にスマホを向けて景色の先の光を確認してください</p>
+        <h1>✨ AR実景合成（水平補正済）</h1>
+        <p>周囲を見回して水平な光の柱を確認してください</p>
     </div>
 
     <button id="start-btn" onclick="startAR()">タップしてカメラとARを開始</button>
@@ -94,17 +89,21 @@
         let scene, camera, renderer;
         const pillars = [];
 
-        // 1. スマホの背面カメラを起動する関数
+        // カメラ・センサー計算用の回転クォータニオン
+        const zee = new THREE.Vector3(0, 0, 1);
+        const euler = new THREE.Euler();
+        const q0 = new THREE.Quaternion();
+        const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // 画面の向き補正
+
         async function initCamera() {
             const video = document.getElementById('camera-video');
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { exact: "environment" } }, // 背面カメラを指定
+                    video: { facingMode: { exact: "environment" } },
                     audio: false
                 });
                 video.srcObject = stream;
             } catch (err) {
-                // 背面カメラの直接指定に失敗した場合は一般的なカメラを取得
                 try {
                     const fallbackStream = await navigator.mediaDevices.getUserMedia({
                         video: true,
@@ -117,7 +116,6 @@
             }
         }
 
-        // 2. 3D空間の初期化（背景透過設定）
         function initThree() {
             const container = document.getElementById('canvas-container');
             
@@ -126,7 +124,6 @@
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
             camera.position.set(0, 1.6, 0);
 
-            // alpha: true で背景を透明にし、後ろのカメラ映像を透過させる
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -135,7 +132,7 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
-            // 📍 5本の光の柱を配置
+            // 5本の柱の配置
             const pillarConfigs = [
                 { x: 0,    z: -30,  radius: 1.5, height: 120, color: 0x00ffff }, 
                 { x: 120,  z: -250, radius: 4.0, height: 300, color: 0x33ffff }, 
@@ -152,7 +149,6 @@
             animate();
         }
 
-        // 光の柱作成
         function createPillar(x, z, radius, height, colorHex) {
             const pillarGroup = new THREE.Group();
 
@@ -188,17 +184,13 @@
             });
         }
 
-        // 3. カメラ起動とセンサー設定を一括スタート
         async function startAR() {
             document.getElementById('start-btn').style.display = 'none';
 
-            // カメラ映像のスタート
             await initCamera();
 
-            // 3Dシーンの初期化
             if (!scene) initThree();
 
-            // ジャイロセンサー（角度）の許可設定
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(response => {
@@ -214,15 +206,20 @@
             }
         }
 
+        // 💡 ジャイロセンサーのオイラー角変換（水平高精度補正）
         function handleOrientation(event) {
             if (!event.alpha && !event.beta && !event.gamma) return;
 
-            const alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0;
-            const beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;
-            const gamma = event.gamma ? THREE.MathUtils.degToRad(event.gamma) : 0;
+            const alpha = event.alpha ? THREE.MathUtils.degToRad(event.alpha) : 0; // 方角
+            const beta = event.beta ? THREE.MathUtils.degToRad(event.beta) : 0;   // 前後傾き
+            const gamma = event.gamma ? THREE.MathUtils.degToRad(event.gamma) : 0; // 左右傾き
+            const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0; // 画面回転
 
-            const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+            // 'ZXY' 順の回転を適用し、スマホの持ち方と空間軸の回転を一致させる
+            euler.set(beta, alpha, -gamma, 'ZXY');
             camera.quaternion.setFromEuler(euler);
+            camera.quaternion.multiply(q1); // スマホカメラの基本姿勢補正
+            camera.quaternion.multiply(q0.setFromAxisAngle(zee, -orient)); // 画面回転補正
         }
 
         function onWindowResize() {
