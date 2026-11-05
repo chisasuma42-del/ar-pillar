@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR実景合成 - 完璧連動版</title>
+    <title>AR実景合成 - スムーズ追従版</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; color: #fff; }
         #camera-video { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
@@ -51,34 +51,37 @@
         const pillars = [];
         const debugElem = document.getElementById('debug-info');
 
-        // 1. タップされた直後にセンサー許可を要求（ここを最優先に修正）
+        // 回転スムーズ化用の補正クォータニオン
+        const targetQuaternion = new THREE.Quaternion();
+        const currentQuaternion = new THREE.Quaternion();
+        const zee = new THREE.Vector3(0, 0, 1);
+        const euler = new THREE.Euler();
+        const q0 = new THREE.Quaternion();
+        const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90度 X軸補正
+
+        let rawAlpha = 0, rawBeta = 0, rawGamma = 0;
+
         function startAR() {
             document.getElementById('start-btn').style.display = 'none';
 
-            // iOS 13+ のセンサー許可（非同期処理を入れる前に真っ先に要求する）
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(response => {
                         if (response === 'granted') {
                             window.addEventListener('deviceorientation', handleOrientation, true);
                             debugElem.innerHTML = "STATUS: センサー許可完了";
-                            // センサーの許可が取れた後にカメラと3Dを開始
                             initSystem();
                         } else {
-                            debugElem.innerHTML = "STATUS: センサー許可が拒否されました";
+                            debugElem.innerHTML = "STATUS: センサー許可拒否";
                         }
                     })
-                    .catch(err => {
-                        debugElem.innerHTML = "ERROR: " + err;
-                    });
+                    .catch(err => { debugElem.innerHTML = "ERROR: " + err; });
             } else {
-                // Android や PC の場合
                 window.addEventListener('deviceorientation', handleOrientation, true);
                 initSystem();
             }
         }
 
-        // 2. カメラと3D描画の初期化処理
         async function initSystem() {
             await initCamera();
             if (!scene) initThree();
@@ -118,8 +121,8 @@
             // 正面・右・左に柱を配置
             const pillarConfigs = [
                 { x: 0,    z: -60,  radius: 2.0, height: 150, color: 0x00ffff }, // 正面
-                { x: 150,  z: 0,    radius: 4.0, height: 300, color: 0x33ffff }, // 右（90度横）
-                { x: -150, z: 0,    radius: 4.0, height: 300, color: 0x00e5ff }  // 左（90度横）
+                { x: 150,  z: 0,    radius: 4.0, height: 300, color: 0x33ffff }, // 右（90度）
+                { x: -150, z: 0,    radius: 4.0, height: 300, color: 0x00e5ff }  // 左（90度）
             ];
 
             pillarConfigs.forEach(config => createPillar(config.x, config.z, config.radius, config.height, config.color));
@@ -135,6 +138,13 @@
             cylinder.position.y = height / 2;
             pillarGroup.add(cylinder);
 
+            // 芯の発光
+            const coreGeo = new THREE.CylinderGeometry(radius * 0.3, radius * 0.3, height, 16, 1, true);
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            core.position.y = height / 2;
+            pillarGroup.add(core);
+
             pillarGroup.position.set(x, 0, z);
             scene.add(pillarGroup);
             pillars.push({ group: pillarGroup, rotSpeed: 0.005 });
@@ -149,18 +159,21 @@
                 alpha = event.webkitCompassHeading;
             }
 
-            debugElem.innerHTML = `STATUS: 動作中<br>方角: ${Math.round(alpha)}°<br>傾き: ${Math.round(beta)}°`;
+            rawAlpha = alpha;
+            rawBeta = beta;
+            rawGamma = gamma;
 
             const alphaRad = THREE.MathUtils.degToRad(alpha);
             const betaRad = THREE.MathUtils.degToRad(beta);
             const gammaRad = THREE.MathUtils.degToRad(gamma);
+            const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0;
 
-            camera.rotation.set(
-                betaRad - Math.PI / 2,
-                -alphaRad,
-                -gammaRad,
-                'YXZ'
-            );
+            // 姿勢の目標角度（Target Quaternion）を計算
+            euler.set(betaRad, alphaRad, -gammaRad, 'YXZ');
+            q0.setFromEuler(euler);
+            targetQuaternion.copy(q0);
+            targetQuaternion.multiply(q1);
+            targetQuaternion.multiply(q0.setFromAxisAngle(zee, -orient));
         }
 
         function onWindowResize() {
@@ -171,6 +184,15 @@
 
         function animate() {
             requestAnimationFrame(animate);
+
+            // 💡 毎フレーム目標角度へ滑らかに補正（slerp補正）
+            // 0.15 の数値を小さくするほど動きがまったり滑らかになり、大きくするとクイックになります
+            camera.quaternion.slerp(targetQuaternion, 0.15);
+
+            if (debugElem) {
+                debugElem.innerHTML = `STATUS: 動作中（滑らか補正ON）<br>方角: ${Math.round(rawAlpha)}°<br>傾き: ${Math.round(rawBeta)}°`;
+            }
+
             pillars.forEach(p => p.group.rotation.y += p.rotSpeed);
             if (scene && camera) renderer.render(scene, camera);
         }
