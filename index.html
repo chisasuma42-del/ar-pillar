@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR実景合成 - 1:1同期版</title>
+    <title>AR実景合成 - 柱1本・垂直固定版</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; color: #fff; }
         #camera-video { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
@@ -35,8 +35,8 @@
     <video id="camera-video" autoplay playsinline muted></video>
 
     <div id="ui">
-        <h1>✨ AR実景合成</h1>
-        <p>周囲を見回して光の柱を確認してください</p>
+        <h1>✨ 光の柱 演出シミュレーター</h1>
+        <p>正面の方角を向いて光の柱を確認してください</p>
     </div>
 
     <div id="debug-info">
@@ -47,19 +47,13 @@
     <div id="canvas-container"></div>
 
     <script>
-        let scene, camera, renderer;
-        const pillars = [];
+        let scene, camera, renderer, mainPillar;
         const debugElem = document.getElementById('debug-info');
 
-        // 滑らか追従用（イージング目標値）
         let targetYaw = 0;
         let targetPitch = 0;
-        let targetRoll = 0;
-
         let currentYaw = 0;
         let currentPitch = 0;
-        let currentRoll = 0;
-
         let rawAlpha = 0, rawBeta = 0;
 
         function startAR() {
@@ -109,7 +103,6 @@
             const container = document.getElementById('canvas-container');
             scene = new THREE.Scene();
 
-            // 💡 実景カメラの画角に最もマッチする FOV: 50度 に調整
             camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
             camera.position.set(0, 1.6, 0);
 
@@ -121,42 +114,67 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
-            // 前後左右に柱を配置
-            const pillarConfigs = [
-                { x: 0,    z: -60,  radius: 2.0, height: 150, color: 0x00ffff }, // 北（正面）
-                { x: 150,  z: 0,    radius: 4.0, height: 300, color: 0x33ffff }, // 東（右90度）
-                { x: -150, z: 0,    radius: 4.0, height: 300, color: 0x00e5ff }, // 西（左90度）
-                { x: 0,    z: 150,  radius: 5.0, height: 300, color: 0x66ffff }  // 南（真後ろ）
-            ];
+            // 📍 柱を1本だけ作成（正面・約30m先）
+            createSinglePillar();
 
-            pillarConfigs.forEach(config => createPillar(config.x, config.z, config.radius, config.height, config.color));
             window.addEventListener('resize', onWindowResize);
             animate();
         }
 
-        function createPillar(x, z, radius, height, colorHex) {
-            const pillarGroup = new THREE.Group();
+        // 象徴的な1本の光の柱を作成
+        function createSinglePillar() {
+            mainPillar = new THREE.Group();
+
+            const radius = 2.5;
+            const height = 200;
+
+            // ① 外殻の発光シリンダー
             const geometry = new THREE.CylinderGeometry(radius, radius, height, 32, 1, true);
-            const material = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.6, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+            const material = new THREE.MeshBasicMaterial({
+                color: 0x00ffff,
+                transparent: true,
+                opacity: 0.65,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending
+            });
             const cylinder = new THREE.Mesh(geometry, material);
             cylinder.position.y = height / 2;
-            pillarGroup.add(cylinder);
+            mainPillar.add(cylinder);
 
+            // ② 芯の強い光
             const coreGeo = new THREE.CylinderGeometry(radius * 0.3, radius * 0.3, height, 16, 1, true);
-            const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+            const coreMat = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.95,
+                blending: THREE.AdditiveBlending
+            });
             const core = new THREE.Mesh(coreGeo, coreMat);
             core.position.y = height / 2;
-            pillarGroup.add(core);
+            mainPillar.add(core);
 
-            pillarGroup.position.set(x, 0, z);
-            scene.add(pillarGroup);
-            pillars.push({ group: pillarGroup, rotSpeed: 0.005 });
+            // ③ 地面の光るリング
+            const ringGeo = new THREE.RingGeometry(0.5, radius * 3, 32);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: 0x00ffff,
+                transparent: true,
+                opacity: 0.8,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending
+            });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.1;
+            mainPillar.add(ring);
+
+            // 正面（Z: -30）に配置
+            mainPillar.position.set(0, 0, -30);
+            scene.add(mainPillar);
         }
 
         function handleOrientation(event) {
             let alpha = event.alpha || 0;
             let beta = event.beta || 0;
-            let gamma = event.gamma || 0;
 
             if (event.webkitCompassHeading) {
                 alpha = event.webkitCompassHeading;
@@ -165,10 +183,9 @@
             rawAlpha = alpha;
             rawBeta = beta;
 
-            // 💡 角度計算を整理（過剰な滑り・スピードオーバーを補正）
-            targetYaw = THREE.MathUtils.degToRad(-alpha);          // 方角（左右パン）
-            targetPitch = THREE.MathUtils.degToRad(beta - 90);    // 上下傾き（直立時0度）
-            targetRoll = THREE.MathUtils.degToRad(-gamma);        // 左右カシメ（ロール）
+            // 💡 左右パン（Yaw）と上下パン（Pitch）のみ取得（傾き/ロールは0に固定）
+            targetYaw = THREE.MathUtils.degToRad(-alpha);
+            targetPitch = THREE.MathUtils.degToRad(beta - 90);
         }
 
         function onWindowResize() {
@@ -180,19 +197,18 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            // 💡 目標角度に対して滑らかに補正（ラープ処理）
+            // スムーズな角度補完
             currentYaw += (targetYaw - currentYaw) * 0.15;
             currentPitch += (targetPitch - currentPitch) * 0.15;
-            currentRoll += (targetRoll - currentRoll) * 0.15;
 
-            // 💡 回転順序 'YXZ' でカメラにダイレクト反映
-            camera.rotation.set(currentPitch, currentYaw, currentRoll, 'YXZ');
+            // 💡 ロール角（Z軸回転）を常に 0 に固定することで柱の斜め傾きを完全に防止
+            camera.rotation.set(currentPitch, currentYaw, 0, 'YXZ');
 
             if (debugElem) {
-                debugElem.innerHTML = `STATUS: 動作中（1:1同期補正済）<br>方角: ${Math.round(rawAlpha)}°<br>傾き: ${Math.round(rawBeta)}°`;
+                debugElem.innerHTML = `STATUS: 動作中（柱1本・垂直固定版）<br>方角: ${Math.round(rawAlpha)}°<br>傾き: ${Math.round(rawBeta)}°`;
             }
 
-            pillars.forEach(p => p.group.rotation.y += p.rotSpeed);
+            if (mainPillar) mainPillar.rotation.y += 0.005;
             if (scene && camera) renderer.render(scene, camera);
         }
     </script>
