@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR実景合成 - 正面出現・垂直固定版</title>
+    <title>AR実景合成 - 強制視認版</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; color: #fff; }
         #camera-video { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
@@ -50,11 +50,9 @@
         let scene, camera, renderer, mainPillar;
         const debugElem = document.getElementById('debug-info');
 
-        let initialAlpha = null; // 起動時の初期角度（正面オフセット）
+        let initialAlpha = null;
         let targetYaw = 0;
-        let targetPitch = 0;
         let currentYaw = 0;
-        let currentPitch = 0;
 
         function startAR() {
             document.getElementById('start-btn').style.display = 'none';
@@ -103,45 +101,46 @@
             const container = document.getElementById('canvas-container');
             scene = new THREE.Scene();
 
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
-            camera.position.set(0, 1.6, 0);
+            // 視野角を大きめ（60度）に設定
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+            camera.position.set(0, 0, 0); // カメラ位置を原点に固定
 
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             container.appendChild(renderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
             scene.add(ambientLight);
 
-            // 📍 柱を1本作成
-            createSinglePillar();
+            // 📍 超巨大な柱を1本作成
+            createGiantPillar();
 
             window.addEventListener('resize', onWindowResize);
             animate();
         }
 
-        function createSinglePillar() {
+        function createGiantPillar() {
             mainPillar = new THREE.Group();
 
-            const radius = 2.5;
-            const height = 200;
+            const radius = 5.0;     // 太さを2倍に
+            const height = 2000.0; // 上下に2000m伸ばす（絶対に見失わない高さ）
 
-            // ① 外殻の発光シリンダー
+            // ① 外殻発光シリンダー
             const geometry = new THREE.CylinderGeometry(radius, radius, height, 32, 1, true);
             const material = new THREE.MeshBasicMaterial({
                 color: 0x00ffff,
                 transparent: true,
-                opacity: 0.65,
+                opacity: 0.7,
                 side: THREE.DoubleSide,
                 blending: THREE.AdditiveBlending
             });
             const cylinder = new THREE.Mesh(geometry, material);
-            cylinder.position.y = height / 2;
+            cylinder.position.y = 0; // カメラの中心高さに跨がるように配置
             mainPillar.add(cylinder);
 
             // ② 芯の強い光
-            const coreGeo = new THREE.CylinderGeometry(radius * 0.3, radius * 0.3, height, 16, 1, true);
+            const coreGeo = new THREE.CylinderGeometry(radius * 0.4, radius * 0.4, height, 16, 1, true);
             const coreMat = new THREE.MeshBasicMaterial({
                 color: 0xffffff,
                 transparent: true,
@@ -149,46 +148,28 @@
                 blending: THREE.AdditiveBlending
             });
             const core = new THREE.Mesh(coreGeo, coreMat);
-            core.position.y = height / 2;
+            core.position.y = 0;
             mainPillar.add(core);
 
-            // ③ 地面の光るリング
-            const ringGeo = new THREE.RingGeometry(0.5, radius * 3, 32);
-            const ringMat = new THREE.MeshBasicMaterial({
-                color: 0x00ffff,
-                transparent: true,
-                opacity: 0.8,
-                side: THREE.DoubleSide,
-                blending: THREE.AdditiveBlending
-            });
-            const ring = new THREE.Mesh(ringGeo, ringMat);
-            ring.rotation.x = -Math.PI / 2;
-            ring.position.y = 0.1;
-            mainPillar.add(ring);
-
-            // 正面（目線から25m先）に配置
-            mainPillar.position.set(0, 0, -25);
+            // 正面20m先に配置
+            mainPillar.position.set(0, 0, -20);
             scene.add(mainPillar);
         }
 
         function handleOrientation(event) {
             let alpha = event.alpha || 0;
-            let beta = event.beta || 0;
 
             if (event.webkitCompassHeading) {
                 alpha = event.webkitCompassHeading;
             }
 
-            // 💡 最初の1回目の計測時、今向いている方角を「基準（正面＝0度）」として記録
+            // 1回目の計測角度を正面基準にする
             if (initialAlpha === null) {
                 initialAlpha = alpha;
             }
 
-            // 基準からの相対的な回転角度を計算
             let relativeAlpha = alpha - initialAlpha;
-
             targetYaw = THREE.MathUtils.degToRad(-relativeAlpha);
-            targetPitch = THREE.MathUtils.degToRad(beta - 90);
         }
 
         function onWindowResize() {
@@ -200,15 +181,12 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            // スムーズ補完
+            // 左右パンのみ滑らかに更新（上下・傾きは一旦0で完全固定）
             currentYaw += (targetYaw - currentYaw) * 0.15;
-            currentPitch += (targetPitch - currentPitch) * 0.15;
-
-            // 垂直固定（Z軸ロールは常に0）
-            camera.rotation.set(currentPitch, currentYaw, 0, 'YXZ');
+            camera.rotation.set(0, currentYaw, 0, 'YXZ');
 
             if (debugElem) {
-                debugElem.innerHTML = `STATUS: 動作中（起動時正面リセット機能付）`;
+                debugElem.innerHTML = `STATUS: 強制表示モード動作中`;
             }
 
             if (mainPillar) mainPillar.rotation.y += 0.005;
