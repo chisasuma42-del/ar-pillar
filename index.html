@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR実景合成 - 柱1本・垂直固定版</title>
+    <title>AR実景合成 - 正面出現・垂直固定版</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; color: #fff; }
         #camera-video { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: 1; }
@@ -36,7 +36,7 @@
 
     <div id="ui">
         <h1>✨ 光の柱 演出シミュレーター</h1>
-        <p>正面の方角を向いて光の柱を確認してください</p>
+        <p>周囲を見回して光の柱を確認してください</p>
     </div>
 
     <div id="debug-info">
@@ -50,11 +50,11 @@
         let scene, camera, renderer, mainPillar;
         const debugElem = document.getElementById('debug-info');
 
+        let initialAlpha = null; // 起動時の初期角度（正面オフセット）
         let targetYaw = 0;
         let targetPitch = 0;
         let currentYaw = 0;
         let currentPitch = 0;
-        let rawAlpha = 0, rawBeta = 0;
 
         function startAR() {
             document.getElementById('start-btn').style.display = 'none';
@@ -114,14 +114,13 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
             scene.add(ambientLight);
 
-            // 📍 柱を1本だけ作成（正面・約30m先）
+            // 📍 柱を1本作成
             createSinglePillar();
 
             window.addEventListener('resize', onWindowResize);
             animate();
         }
 
-        // 象徴的な1本の光の柱を作成
         function createSinglePillar() {
             mainPillar = new THREE.Group();
 
@@ -167,8 +166,8 @@
             ring.position.y = 0.1;
             mainPillar.add(ring);
 
-            // 正面（Z: -30）に配置
-            mainPillar.position.set(0, 0, -30);
+            // 正面（目線から25m先）に配置
+            mainPillar.position.set(0, 0, -25);
             scene.add(mainPillar);
         }
 
@@ -180,11 +179,15 @@
                 alpha = event.webkitCompassHeading;
             }
 
-            rawAlpha = alpha;
-            rawBeta = beta;
+            // 💡 最初の1回目の計測時、今向いている方角を「基準（正面＝0度）」として記録
+            if (initialAlpha === null) {
+                initialAlpha = alpha;
+            }
 
-            // 💡 左右パン（Yaw）と上下パン（Pitch）のみ取得（傾き/ロールは0に固定）
-            targetYaw = THREE.MathUtils.degToRad(-alpha);
+            // 基準からの相対的な回転角度を計算
+            let relativeAlpha = alpha - initialAlpha;
+
+            targetYaw = THREE.MathUtils.degToRad(-relativeAlpha);
             targetPitch = THREE.MathUtils.degToRad(beta - 90);
         }
 
@@ -197,15 +200,15 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            // スムーズな角度補完
+            // スムーズ補完
             currentYaw += (targetYaw - currentYaw) * 0.15;
             currentPitch += (targetPitch - currentPitch) * 0.15;
 
-            // 💡 ロール角（Z軸回転）を常に 0 に固定することで柱の斜め傾きを完全に防止
+            // 垂直固定（Z軸ロールは常に0）
             camera.rotation.set(currentPitch, currentYaw, 0, 'YXZ');
 
             if (debugElem) {
-                debugElem.innerHTML = `STATUS: 動作中（柱1本・垂直固定版）<br>方角: ${Math.round(rawAlpha)}°<br>傾き: ${Math.round(rawBeta)}°`;
+                debugElem.innerHTML = `STATUS: 動作中（起動時正面リセット機能付）`;
             }
 
             if (mainPillar) mainPillar.rotation.y += 0.005;
